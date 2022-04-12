@@ -33,7 +33,7 @@ waiting = []
 threewayhandshake = []
 scannedports = {}
 
-LANip = '172.19.245.201'
+LANip = '127.0.0.1'
 
 
 def convert(dec):
@@ -46,8 +46,8 @@ def convert(dec):
 	return final
 
 def eth_addr (a) :
-    b = "%.2x:%.2x:%.2x:%.2x:%.2x:%.2x" % (ord(a[0]) , ord(a[1]) , ord(a[2]), ord(a[3]), ord(a[4]) , ord(a[5]))
-    return b
+	b = "%.2x:%.2x:%.2x:%.2x:%.2x:%.2x" % (a[0] , a[1] , a[2], a[3], a[4] , a[5])
+	return b
  
 def time_diff(outside,vaxt=5):
     netice = (time.time()-int(outside))/60
@@ -126,7 +126,7 @@ def scancheck(sip,dip,sport,dport,seqnum,acknum,flags):
 	return False, 0
 
 def fullconnectscan(sip,dip,sport,dport,seqnum,acknum,flags):
-	if(scannedports.has_key(dip)):
+	if(dip in scannedports):
 		scannedports[dip].append(str(sport))
 	else:
 		scannedports[dip] = []
@@ -154,13 +154,13 @@ def fullconnectscan(sip,dip,sport,dport,seqnum,acknum,flags):
 				fullscandb[dbdata+"_SYN"] = str(seqnum)+"_"+str(acknum)+"_"+str(sport)+"_"+str(dport)
 				
 		elif("RST" in flags and "ACK" in flags and len(flags)==2):
-			if(fullscandb.has_key(dip+"->"+sip+"_SYN")):
+			if((dip+"->"+sip+"_SYN") in fullscandb):
 				manage = fullscandb[dip+"->"+sip+"_SYN"]
 				pieces = manage.split("_")
 				old_acknum = int(pieces[1])
 				old_seqnum = int(pieces[0])
 				if(seqnum==0 and acknum==old_seqnum+1):
-					if(fullscandb.has_key(dbdata)):
+					if(dbdata in fullscandb):
 						counter = int(fullscandb[dbdata])
 						if(counter>=3):
 							
@@ -176,7 +176,7 @@ def fullconnectscan(sip,dip,sport,dport,seqnum,acknum,flags):
 	return False			
 
 def halfconnectscan(sip,dip,sport,dport,seqnum,acknum,flags):
-	if(scannedports.has_key(dip)):
+	if(dip in scannedports):
 		scannedports[dip].append(str(sport))
 	else:
 		scannedports[dip] = []
@@ -185,18 +185,18 @@ def halfconnectscan(sip,dip,sport,dport,seqnum,acknum,flags):
 	if("SYN" in flags and seqnum>0 and acknum==0 and len(flags)==1):
 		halfscandb[dbdata+"_"+str(seqnum)] = dbdata+"_SYN_ACK_"+str(seqnum)+"_"+str(acknum)
 	elif("RST" in flags and "ACK" in flags and len(flags)==2):
-		if(halfscandb.has_key(reverse+"_"+str(acknum-1))):
+		if((reverse+"_"+str(acknum-1)) in halfscandb):
 			del halfscandb[reverse+"_"+str(acknum-1)]
 			if(str(dip) not in blacklist):
 				blacklist.append(str(dip))
 			
 			return True	
 	elif("SYN" in flags and "ACK" in flags and len(flags)==2):
-		if(halfscandb.has_key(reverse+"_"+str(acknum-1))):
+		if((reverse+"_"+str(acknum-1)) in halfscandb):
 			del halfscandb[reverse+"_"+str(acknum-1)]
 			halfscandb[reverse+"_"+str(acknum)] = dbdata+"_RST_"+str(seqnum)+"_"+str(acknum)
 	elif("RST" in flags and len(flags)==1):
-		if(halfscandb.has_key(dbdata+"_"+str(seqnum))):
+		if((dbdata+"_"+str(seqnum)) in halfscandb):
 			if(str(dip) not in blacklist):
 				blacklist.append(str(dip))
 		
@@ -207,7 +207,7 @@ def halfconnectscan(sip,dip,sport,dport,seqnum,acknum,flags):
 	
 
 def xmasscan(sip,dip,sport,dport,seqnum,acknum,flags):
-	if(scannedports.has_key(dip)):
+	if(dip in scannedports):
 		scannedports[dip].append(str(sport))
 	else:
 		scannedports[dip] = []
@@ -222,7 +222,7 @@ def xmasscan(sip,dip,sport,dport,seqnum,acknum,flags):
 
 
 def finscan(sip,dip,sport,dport,seqnum,acknum,flags):
-	if(scannedports.has_key(dip)):
+	if(dip in scannedports):
 		scannedports[dip].append(str(sport))
 	else:
 		scannedports[dip] = []
@@ -237,7 +237,7 @@ def finscan(sip,dip,sport,dport,seqnum,acknum,flags):
 
 
 def nullscan(sip,dip,sport,dport,seqnum,acknum,flags):
-	if(scannedports.has_key(dip)):
+	if(dip in scannedports):
 		scannedports[dip].append(str(sport))
 	else:
 		scannedports[dip] = []
@@ -252,7 +252,7 @@ def nullscan(sip,dip,sport,dport,seqnum,acknum,flags):
 
 
 def ackscan(sip,dip,sport,dport,seqnum,acknum,flags):
-	if(scannedports.has_key(dip)):
+	if(dip in scannedports):
 		scannedports[dip].append(str(sport))
 	else:
 		scannedports[dip] = []
@@ -285,7 +285,8 @@ now = time.time()
 protocol_numb = {"1":"ICMP","6":"TCP","17":"UDP"}
 
 num = 0
-scanningIPs = []
+scanningIPs = {}
+ipsDetected = []
 print("Detecting Scans...")
 while True:
 	packet = s.recvfrom(65565)
@@ -334,17 +335,12 @@ while True:
 				threewaycheck(s_addr,d_addr,source_port,dest_port,seq_numb,dest_numb,tcp_flags)
 			yee, sip = scancheck(s_addr,d_addr,source_port,dest_port,seq_numb,dest_numb,tcp_flags)
 			if (yee):
-				num+=1
-				if (num > 10):
-					if (sip in scanningIPs):
-						num = 0
-						continue
-					else:
-						print("Scan Detected from " + sip)
-						scanningIPs.append(sip)
-						num = 0
-			
-
-
-
-
+				if (sip in scanningIPs):
+					scanningIPs[sip]+=1
+				else:
+					scanningIPs[sip]=1
+				if(scanningIPs[sip]>=3 and sip not in ipsDetected):
+					print("Port Scan Detected from: "+sip)
+					ipsDetected.append(sip)
+					scanningIPs[sip]=0
+					#TODO Send message to AWS saying we are being scanned by SIP!
