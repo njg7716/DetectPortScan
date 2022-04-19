@@ -6,6 +6,10 @@ from collections import OrderedDict
 import os
 import signal
 import optparse 
+import json
+import datetime
+import time
+from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTClient
 #define ETH_P_ALL    0x0003
 
 
@@ -33,8 +37,27 @@ waiting = []
 threewayhandshake = []
 scannedports = {}
 
-LANip = '127.0.0.1'
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.connect(("8.8.8.8", 80))
+LANip = [s.getsockname()[0], "192.168.3.1"]
 
+def mqtt_client():
+    # Configuration details and certificate paths
+    clientId = "Omega-A762"
+    endpoint = "a3qbkyl9p3pso3-ats.iot.us-east-1.amazonaws.com"
+    rootCAFilePath = "/IoT/certs/AmazonRootCA1.pem"
+    privateKeyFilePath = "/IoT/certs/private.pem.key"
+    certFilePath = "/IoT/certs/device.pem.crt"
+    myMQTTClient = AWSIoTMQTTClient(clientId)
+    myMQTTClient.configureEndpoint(endpoint, 8883)
+    myMQTTClient.configureCredentials(
+        rootCAFilePath, privateKeyFilePath, certFilePath)
+    myMQTTClient.configureOfflinePublishQueueing(-1)
+    myMQTTClient.configureDrainingFrequency(2)  # Draining: 2 Hz
+    myMQTTClient.configureConnectDisconnectTimeout(10)  # 10 sec
+    myMQTTClient.configureMQTTOperationTimeout(5)  # 5 sec
+    myMQTTClient.connect()
+    return myMQTTClient
 
 def convert(dec):
 	final = []
@@ -53,6 +76,7 @@ def time_diff(outside,vaxt=5):
     netice = (time.time()-int(outside))/60
     if(netice>=vaxt):
         return True
+        
 def show_ports(signum,frm):
 	for ips in scannedports:
 		for single in scannedports[ips]:
@@ -61,7 +85,7 @@ def show_ports(signum,frm):
 	print("\n\n")
    
 	for ip in blacklist:
-		if(scannedports.has_key(str(ip)) and ip!=LANip):
+		if(scannedports.has_key(str(ip)) and ip not in LANip):
 			print("Attacker from ip "+ip+" scanned ["+ ",".join(scannedports[ip])+"] ports.")
 
 
@@ -101,28 +125,26 @@ def scancheck(sip,dip,sport,dport,seqnum,acknum,flags):
 	if(halfconnectscan(sip,dip,sport,dport,seqnum,acknum,flags)):
 		returned = halfconnectscan(sip,dip,sport,dport,seqnum,acknum,flags)
 		if(isinstance(returned,(str))):
-			print(returned)
-			return False, 0
+			return True, sip
 		else:
 			#print (bgcolors.BOLD+bgcolors.OKBLUE+revthreeway+bgcolors.ENDC+bgcolors.WARNING+bgcolors.BOLD+" Port Scanning Detected: [Style not Defined]:Attempt to connect closed port!"+bgcolors.ENDC)
-			return True, sip
+			return True, dip
 	elif(fullconnectscan(sip,dip,sport,dport,seqnum,acknum,flags)):
 		returned = fullconnectscan(sip,dip,sport,dport,seqnum,acknum,flags)
 		if(isinstance(returned,(str))):
-			print (returned)
-			return False, 0
+			return True, sip
 		else:
 			#print (bgcolors.BOLD+bgcolors.OKBLUE+revthreeway+bgcolors.ENDC+bgcolors.WARNING+bgcolors.BOLD+" Port Scanning Detected: [Style not Defined]:Attempt to connect closed port!"+bgcolors.ENDC)
-			return True, sip
+			return True, dip
 	elif(xmasscan(sip,dip,sport,dport,seqnum,acknum,flags)):
 		#print (bgcolors.BOLD+bgcolors.OKBLUE+dataforthreewaycheck+bgcolors.ENDC +bgcolors.BOLD+bgcolors.FAIL+ " => [Runtime Detection:] XMAS scan detected!"+bgcolors.ENDC)
-		return True, sip
+		return True, dip
 	elif(finscan(sip,dip,sport,dport,seqnum,acknum,flags)):
 		#print (bgcolors.BOLD+bgcolors.OKBLUE+ dataforthreewaycheck+bgcolors.ENDC+ bgcolors.BOLD+bgcolors.FAIL+" => [Runtime Detection:] FIN scan detected!"+bgcolors.ENDC)
-		return True, sip
+		return True, dip
 	elif(nullscan(sip,dip,sport,dport,seqnum,acknum,flags)):
 		#print (bgcolors.BOLD+bgcolors.OKBLUE+dataforthreewaycheck +bgcolors.ENDC+bgcolors.BOLD+bgcolors.FAIL+ " => [Runtime Detection:] NULL scan detected!"+bgcolors.ENDC)
-		return True, sip
+		return True, dip
 	return False, 0
 
 def fullconnectscan(sip,dip,sport,dport,seqnum,acknum,flags):
@@ -134,7 +156,7 @@ def fullconnectscan(sip,dip,sport,dport,seqnum,acknum,flags):
 	
 	if(dataforthreewaycheck in threewayhandshake):
 		if("ACK" in flags and "RST" in flags and len(flags)==2):
-			if(fullscandb.has_key(dbdata)):
+			if(dbdata in fullscandb):
 				counter = int(fullscandb[dbdata])
 				if(counter>=3):
 					
@@ -288,7 +310,14 @@ num = 0
 scanningIPs = {}
 ipsDetected = []
 print("Detecting Scans...")
+myMQTTClient = mqtt_client()
+startTime = time.time()
 while True:
+	if (((time.time() - startTime)/60) > 5 ):
+		scanningIPs = {}
+		ipsDetected = []
+		startTime = time.time()
+		
 	packet = s.recvfrom(65565)
 	packet = packet[0]
 	eth_length = 14
@@ -335,12 +364,19 @@ while True:
 				threewaycheck(s_addr,d_addr,source_port,dest_port,seq_numb,dest_numb,tcp_flags)
 			yee, sip = scancheck(s_addr,d_addr,source_port,dest_port,seq_numb,dest_numb,tcp_flags)
 			if (yee):
-				if (sip in scanningIPs):
-					scanningIPs[sip]+=1
-				else:
-					scanningIPs[sip]=1
-				if(scanningIPs[sip]>=3 and sip not in ipsDetected):
-					print("Port Scan Detected from: "+sip)
-					ipsDetected.append(sip)
-					scanningIPs[sip]=0
-					#TODO Send message to AWS saying we are being scanned by SIP!
+				if (sip not in LANip):
+					if (sip in scanningIPs):
+						scanningIPs[sip]+=1
+					else:
+						scanningIPs[sip]=1
+					if(scanningIPs[sip]>=3 and sip not in ipsDetected):
+						print("Port Scan Detected from: "+sip)
+						ipsDetected.append(sip)
+						scanningIPs[sip]=0
+						message_map = {
+							"sourceIP" : sip,
+							"datetime" : str(datetime.datetime.now())
+						}
+						message_json = json.dumps(message_map)
+						work = myMQTTClient.publish("OmegaA762/portScans", message_json, 1)
+						
